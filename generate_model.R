@@ -1,3 +1,16 @@
+## In single-cell RNA-seq, a lot of cells will die during the dissocation
+## process or have been dead already, meaning their RNA is degraded and
+## shouldn't be included in downstream analysis. One sign of this is if
+## most of the RNA reads are coming from mtDNA, which is usually protected by
+## the mitochondrial membrane and thus degrades slower. People usually set some
+## rule like "exclude all cells with >15% mitochondrial reads," but what cutoff
+## works varies widely by experiment and we'd like a more data-driven way to
+## make the decision of if a cell is dead and to exclude it. We hypothesize any
+## experiment will have two distributions of total genes expressed and percent
+## mitochondrial reads, one of healthy cells and one of dead cells. This script
+## creates a mixture model to estimate these distributions and select cells to
+## remove based on posterior probability of coming from the dead distribution.
+
 suppressPackageStartupMessages({
   library(optparse)
   library(SingleCellExperiment)
@@ -10,7 +23,8 @@ source("config.R")
 
 option_list = list(
   make_option(c("-f", "--file"), type="character", default="16030X2"),
-  make_option(c("-m", "--model"), type="character", default="linear")
+  make_option(c("-m", "--model"), type="character", default="linear"),
+  make_option(c("-c", "--cutoff"), type="numeric", default=0.75)
 )
 opt_parser = OptionParser(option_list=option_list)
 opt = parse_args(opt_parser)
@@ -22,7 +36,7 @@ location <- paste(path_to_mito_filtering,
 sce <- readRDS(location)
 metrics <- as.data.frame(colData(sce))
 
-# visualize data distribution
+# visualize data distributionG
 png(paste(path_to_mito_filtering,"/plots/",opt$file,"_loess.png",sep=""),width=1200, height=800)
 ggplot(metrics, aes(x=detected,y=subsets_mito_percent)) + geom_point() +
   stat_smooth(method="loess",formula=y~x,size=1,se=F,colour="blue") +
@@ -51,7 +65,10 @@ ggplot(metrics, aes(x=detected,y=subsets_mito_percent)) + geom_point() +
   ggtitle(opt$file)
 dev.off()
 
-# determine which model component is the dead cell distribution
+# Determine which model component is the dead cell distribution,
+# since flexmix doesn't number the distributions deterministically.
+# Dead cell distribution should always have a higher y-intercept than
+# the alive cell distribution, no matter the kind of model used.
 intercept1 <- parameters(model, component=1)[1]
 intercept2 <- parameters(model, component=2)[1]
 if(intercept1 > intercept2){
@@ -75,7 +92,7 @@ dev.off()
 # determine which cells to keep
 png(paste(path_to_mito_filtering, "/plots/", opt$file, "_",
           opt$model, "_keep.png", sep=""), width=1200, height=800)
-metrics$keep<-metrics$probability_dead <= 0.75
+metrics$keep<-metrics$probability_dead <= opt$cutoff
 ggplot(metrics, aes(x=detected,y=subsets_mito_percent,colour=keep)) +
   labs(x="Unique genes found", y="Percent reads mitochondrial") +
   geom_point() + ggtitle(opt$file) 
