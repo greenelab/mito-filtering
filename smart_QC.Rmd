@@ -1,0 +1,320 @@
+---
+title: "smart_QC"
+output:
+  html_document:
+    toc: true
+    toc_depth: 4
+    toc_float:
+      collapsed: false
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup,  include = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Intro 
+
+We discovered one reason why the differential expression results were uninspiring was that a large proportion of our cells had failed but not been removed by the basic QC. 
+One easy way to tell this was that for many cells, the majority of their RNA reads were from mitochondrial genes, a sign that either something went wrong in library prep or the cell is dead. 
+With this in mind, we're going to build a more intelligent QC process using a probabilistic model of if an individual cell failed or not.
+
+```{r packages}
+suppressPackageStartupMessages({
+  library(data.table)
+  library(dplyr)
+  library(tximport)
+  library(scater)
+  library(scran)
+  library(ggplot2)
+  library(flexmix)
+})
+```
+
+## Load data
+
+We'll load in all three of our tumors and look separately at their particular distribution of mitochondrial reads.
+```{r loaddata}
+
+load_data <- function(tumorname){
+  filename <- paste("../../data/tumors/", tumorname, "/alevin_output/alevin/quants_mat.gz",sep="")
+  txia <- suppressMessages(tximport(filename, type = "alevin"))
+  sce <- SingleCellExperiment(assays = list(counts = txia$counts))
+  
+  sce
+}
+
+x2 <- load_data("16030X2")
+x3 <- load_data("16030X3")
+x4 <- load_data("16030X4")
+```
+
+Our gene-by-count matrix has genes listed by ensembl IDs,  so we'll change those to more standard gene symbols for easier analysis.
+Typically we'd use biomaRt for this purpose,  but its mapping isn't complete for all our IDs,  so we'll use a file made by hand from our gencode reference transcriptome.
+
+```{r nameswap}
+gene_map <- fread("../../data/index/gene2symbol.tsv", header = F)
+setnames(gene_map, c("ensembl_id", "gene_symbol"))
+
+name_swap <- function(sce){
+  rowData(sce)$ensembl_id <- rownames(sce)
+  rowData(sce) <- left_join(as.data.frame(rowData(sce)), gene_map)
+  rownames(sce) <- rowData(sce)$gene_symbol
+  
+  rowData(sce)$gene_symbol <- NULL
+  rowData(sce)$ensembl_id <- NULL
+  
+  sce
+}
+
+x2 <- name_swap(x2)
+x3 <- name_swap(x3)
+x4 <- name_swap(x4)
+```
+
+## Calculate QC metrics
+
+To calculate what percentage of RNA reads were from mitochondrial genes, we simply need to find the mitochondrial genes and sum up their counts. 
+We're also finding the ribosomal genes (since rRNA should have been depleted in library prep) in case we want to add that to a future model.
+
+```{r get_mito_genes}
+mt_genes <- grepl("^MT-",  rownames(x2))
+
+feature_ctrls <- list(mito = rownames(x2)[mt_genes])
+
+sum(mt_genes)
+```
+
+The scater package will calculate mitochondrial read fraction and several other useful metrics for us.
+```{r run_scater}
+
+run_scater <- function(sce){
+  sce <- addPerCellQC(sce, subsets = feature_ctrls,
+                      BPPARAM = BiocParallel::MulticoreParam())
+  
+  sce <- addPerFeatureQC(sce, BPPARAM = BiocParallel::MulticoreParam())
+  rowData(sce)$Gene <- rownames(rowData(sce))
+  sce
+}
+x2 <- run_scater(x2)
+x3 <- run_scater(x3)
+x4 <- run_scater(x4)
+```
+
+A small number of cells will have failed unambiguously, so we'll throw those out before building any sort of probabilistic model.
+```{r remove_obviously_bad}
+
+remove_worst_cells <- function(sce){
+  filt <- sce$sum > 500 & sce$detected > 100
+  length(which(!filt))
+  sce<-sce[,filt]
+  sce
+}
+
+x2 <- remove_worst_cells(x2)
+x3 <- remove_worst_cells(x3)
+x4 <- remove_worst_cells(x4)
+```
+
+# Cell-wise QC
+
+## Build model
+
+For simplicity, now we'll focus only on tumor 16030X2, and return the other tumors later.
+We'll focus on two metrics of cell quality, mitochondrial read fraction and number of unique features (genes) with at least one read.
+```{r visualize}
+metrics <- as.data.frame(colData(x2))
+
+p <- ggplot(metrics, aes(x=detected,y=subsets_mito_percent)) + geom_point()
+p + stat_smooth(method="loess",formula=y~x,size=1,se=F,colour="blue")
+
+p <- ggplot(metrics, aes(x=total_counts,y=subsets_mito_percent)) + geom_point()
+p <- ggplot(metrics, aes(x=detected,y=log10_total_counts)) + geom_point()
+```
+
+From this plot, we can see a dramatic shift in the relationship between the two variables at around 1500 features. 
+After 1500 features, the percent of mitochondrial reads stabilizes, but before then they're tightly inversely linked. 
+We can think of the cells as having been drawn from two different distributions, the "functional" distribution and the "failed" distribution.
+
+We can make a linear mixed model to try and estimate the parameters of these distributions. We'll use the flexmix package to accomplish this.
+```{r run_flexmix}
+#k=2 means we believe there's two distributions here
+options(scipen = 5)
+set.seed(1010)
+model<-flexmix(subsets_mito_percent~detected,data=metrics,k=2)
+model@components
+
+slope_1=model@components$Comp.1[[1]]@parameters$coef[2]
+intercept_1=model@components$Comp.1[[1]]@parameters$coef[1]
+
+slope_2=model@components$Comp.2[[1]]@parameters$coef[2]
+intercept_2=model@components$Comp.2[[1]]@parameters$coef[1]
+
+ggplot(metrics, aes(x=detected,y=subsets_mito_percent)) + geom_point() + geom_abline(data=metrics,aes(slope=slope_1,intercept=intercept_1)) + geom_abline(data=metrics,aes(slope=slope_2,intercept=intercept_2))
+```
+
+This is great: we can see what we expected, one distribution where feature count has no relationship to mitochondrial fraction and one where it does. 
+
+## Apply model
+
+We can also use flexmix to calculate the posterior probability of each cell being drawn from each distribution and use that to make a decision about whether or not to throw it out.
+
+```{r calc_posteriors}
+post <- posterior(model)
+metrics$posterior_dist1 <- post[,1]
+metrics$posterior_dist2 <- post[,2]
+
+ggplot(metrics, aes(x=detected,y=subsets_mito_percent,colour=posterior_dist1)) + geom_point() + geom_abline(data=metrics,aes(slope=slope_1,intercept=intercept_1)) + geom_abline(data=metrics,aes(slope=slope_2,intercept=intercept_2))
+```
+
+From this, we can make a decision to throw out any cell with less than a certain posterior probability of coming from the "functional" cell distribution. 
+For now, we'll use 25%, but we may decide on a different cutoff once we've done more downstream analysis.
+```{r make_cutoff}
+metrics$keep<-metrics$posterior_dist1<=0.75
+ggplot(metrics, aes(x=detected,y=subsets_mito_percent,colour=keep)) + geom_point()
+table(metrics$keep)
+
+x2 <- x2[,metrics$keep]
+dim(x2)
+```
+
+## Build other tumor models
+
+### 16030X3
+
+```{r run_X3}
+metrics <- as.data.frame(colData(x3))
+
+ggplot(metrics, aes(x=detected,y=subsets_mito_percent)) + geom_point() + stat_smooth(method="loess",formula=y~x,size=1,se=F,colour="blue")
+
+set.seed(1010)
+model<-flexmix(subsets_mito_percent~detected,data=metrics,k=2)
+model@components
+
+slope_1=model@components$Comp.1[[1]]@parameters$coef[2]
+intercept_1=model@components$Comp.1[[1]]@parameters$coef[1]
+
+slope_2=model@components$Comp.2[[1]]@parameters$coef[2]
+intercept_2=model@components$Comp.2[[1]]@parameters$coef[1]
+
+ggplot(metrics, aes(x=detected,y=subsets_mito_percent)) + geom_point() + geom_abline(data=metrics,aes(slope=slope_1,intercept=intercept_1)) + geom_abline(data=metrics,aes(slope=slope_2,intercept=intercept_2))
+
+post <- posterior(model)
+metrics$posterior_dist1 <- post[,1]
+metrics$posterior_dist2 <- post[,2]
+
+ggplot(metrics, aes(x=detected,y=subsets_mito_percent,colour=posterior_dist1)) + geom_point() + geom_abline(data=metrics,aes(slope=slope_1,intercept=intercept_1)) + geom_abline(data=metrics,aes(slope=slope_2,intercept=intercept_2))
+
+metrics$keep<-metrics$posterior_dist1>=0.25
+ggplot(metrics, aes(x=detected,y=subsets_mito_percent,colour=keep)) + geom_point()
+table(metrics$keep)
+
+x3 <- x3[,metrics$keep]
+dim(x3)
+```
+
+
+### 16030X4
+
+```{r run_X4}
+metrics <- as.data.frame(colData(x4))
+
+ggplot(metrics, aes(x=detected,y=subsets_mito_percent)) + geom_point() + stat_smooth(method="loess",formula=y~x,size=1,se=F,colour="blue")
+
+set.seed(1010)
+model<-flexmix(subsets_mito_percent~detected,data=metrics,k=2)
+model@components
+
+slope_1=model@components$Comp.1[[1]]@parameters$coef[2]
+intercept_1=model@components$Comp.1[[1]]@parameters$coef[1]
+
+slope_2=model@components$Comp.2[[1]]@parameters$coef[2]
+intercept_2=model@components$Comp.2[[1]]@parameters$coef[1]
+
+ggplot(metrics, aes(x=detected,y=subsets_mito_percent)) + geom_point() + geom_abline(data=metrics,aes(slope=slope_1,intercept=intercept_1)) + geom_abline(data=metrics,aes(slope=slope_2,intercept=intercept_2))
+
+post <- posterior(model)
+metrics$posterior_dist1 <- post[,1]
+metrics$posterior_dist2 <- post[,2]
+
+ggplot(metrics, aes(x=detected,y=subsets_mito_percent,colour=posterior_dist1)) + geom_point() + geom_abline(data=metrics,aes(slope=slope_1,intercept=intercept_1)) + geom_abline(data=metrics,aes(slope=slope_2,intercept=intercept_2))
+
+metrics$keep<-metrics$posterior_dist1>=0.25
+ggplot(metrics, aes(x=detected,y=subsets_mito_percent,colour=keep)) + geom_point()
+table(metrics$keep)
+
+x4 <- x4[,metrics$keep]
+dim(x4)
+```
+
+# Gene-wise QC
+
+Now that we have decided which cells we're keeping, we can determine which genes we'll consider for our differential expression analysis. 
+Once again, we'll do this on each tumor individually, walking through 16030X2 as an example and then performing the same operations on 16030X3 and 16030X4.
+
+## Remove sparse genes
+
+If a gene has only a tiny number of reads or is only found in a tiny number of cells, it probably won't be useful for our differential expression analysis, so we'll remove them now.
+```{r filter_genes}
+num_reads <- 1                  # minimum 1 read
+num_cells <- 0.025 * ncol(x2)   # in at least 2.5% of all cells
+keep <- rowSums(counts(x2) >= num_reads) >= num_cells
+x2 <- x2[keep, ]
+dim(x2)
+```
+
+## Estimate technical variation
+
+While we want to keep all genes that have a certain amount of representation in our cells, we're particularly interested in genes that are expressed differently across various cells.
+To measure this, we'll use scran to determine how much variation in read depth we'd expect to see normally based on mean read count (this is technical variance), and subtract that from the observed variance.
+If there's more variance seen than would be expected due to technical error alone, we can infer that there is some true biological difference occurring. We'll save the per-gene amount of biological variance for later.
+```{r variance_curve}
+x2 <- scater::normalize(x2)
+
+fit <- trendVar(x2, use.spikes = F, parametric = T)
+plot(fit$mean, fit$var)
+curve(fit$trend(x), col = 'red', lwd = 2, add = TRUE)
+
+dec <- decomposeVar(x2, fit)           #determines what amount of variation is technical and what's biological 
+rowData(x2)$bio_variance <- dec$bio
+saveRDS(x2,file="16030X2_QC.rds")
+```
+
+## Rerun with other tumors
+
+### 16030X3
+```{r run_gene_X3}
+num_cells <- 0.025 * ncol(x3)
+keep <- rowSums(counts(x3) >= num_reads) >= num_cells
+x3 <- x3[keep, ]
+dim(x3)
+
+x3 <- scater::normalize(x3)
+
+fit <- trendVar(x3, use.spikes = F, parametric = T)
+plot(fit$mean, fit$var)
+curve(fit$trend(x), col = 'red', lwd = 2, add = TRUE)
+
+dec <- decomposeVar(x3, fit)
+rowData(x3)$bio_variance <- dec$bio
+saveRDS(x3,file="16030X3_QC.rds")
+```
+
+### 16030X4
+```{r run_gene_X4}
+num_cells <- 0.025 * ncol(x4)
+keep <- rowSums(counts(x4) >= num_reads) >= num_cells
+x4 <- x4[keep, ]
+dim(x4)
+
+x4 <- scater::normalize(x4)
+
+fit <- trendVar(x4, use.spikes = F, parametric = T)
+plot(fit$mean, fit$var)
+curve(fit$trend(x), col = 'red', lwd = 2, add = TRUE)
+
+dec <- decomposeVar(x4, fit)
+rowData(x4)$bio_variance <- dec$bio
+saveRDS(x4,file="16030X4_QC.rds")
+```
