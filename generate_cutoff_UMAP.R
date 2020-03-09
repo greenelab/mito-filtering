@@ -10,6 +10,7 @@ suppressPackageStartupMessages({
   library(optparse)
   library(SingleCellExperiment)
   library(ggplot2)
+  library(scater)
 })
 
 source("config.R")
@@ -36,8 +37,8 @@ sce <- runUMAP(sce,
                spread = 0.7,
                n_neighbors = 15)
 
-sce$cutoff_keep <- sce[,sce$subsets_mito_percent < opt$percent]
-png(paste(path_to_mito_filtering, "/plots", opt$file, "_UMAP_cutoff_",
+sce$cutoff_keep <- sce$subsets_mito_percent < opt$percent
+png(paste(path_to_mito_filtering, "/plots/", opt$file, "_UMAP_cutoff_",
           opt$percent, ".png", sep=""),width=800, height=800)
 plotUMAP(sce, colour_by="cutoff_keep")
 dev.off()
@@ -53,7 +54,7 @@ cutoff <- runUMAP(cutoff,
                   spread = 0.7,
                   n_neighbors = 15)
 
-png(paste(path_to_mito_filtering, "/plots", opt$file, "_UMAP_cutoff_",
+png(paste(path_to_mito_filtering, "/plots/", opt$file, "_UMAP_cutoff_",
           opt$percent, "_only.png", sep=""),width=800, height=800)
 plotUMAP(cutoff)
 dev.off()

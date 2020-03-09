@@ -8,7 +8,6 @@ suppressPackageStartupMessages({
   library(optparse)
   library(SingleCellExperiment)
   library(ggplot2)
-  library(splines)
   library(scater)
 })
 
@@ -36,16 +35,16 @@ sce <- runUMAP(sce,
                spread = 0.7,
                n_neighbors = 15)
 
-png(paste(path_to_mito_filtering, "/plots/", opt$file, "_",
-          opt$model,"_UMAP.png",sep=""),width=800, height=800)
+png(paste(path_to_mito_filtering, "/plots/", opt$file,
+          "_UMAP.png",sep=""),width=800, height=800)
 plotUMAP(sce, colour_by="subsets_mito_percent")
 dev.off()
 
 
 # Plot full UMAP colored by which cells kept
 justkeep <- sce[,sce$keep==T]
-png(paste(path_to_mito_filtering, "/plots", opt$file, "_UMAP_", opt$model,
-          "_filtered.png", sep=""),width=800, height=800)
+png(paste(path_to_mito_filtering, "/plots/", opt$file, "_UMAP_", opt$model,
+          ".png", sep=""),width=800, height=800)
 plotUMAP(sce, colour_by="keep")
 dev.off()
 
@@ -60,8 +59,8 @@ justkeep <- runUMAP(justkeep,
                spread = 0.7,
                n_neighbors = 15)
 
-png(paste(path_to_mito_filtering, "/plots", opt$file, "_UMAP_", opt$model,
-          "_filtered_only.png", sep=""), width=800, height=800)
+png(paste(path_to_mito_filtering, "/plots/", opt$file, "_UMAP_", opt$model,
+          "_only.png", sep=""), width=800, height=800)
 plotUMAP(justkeep)
 dev.off()
 
