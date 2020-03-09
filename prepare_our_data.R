@@ -48,11 +48,12 @@ sce <- addPerCellQC(sce, subsets = feature_ctrls,
                     BPPARAM = BiocParallel::MulticoreParam())
 
 sce <- addPerFeatureQC(sce, BPPARAM = BiocParallel::MulticoreParam())
-#rowData(sce)$Gene <- rownames(rowData(sce))
-#sce
+
+# normalize counts for UMAP
+sce <- logNormCounts(sce)
 
 # remove unambiguously failed cells
-filt <- sce$sum > 100 & sce$detected > 50
+filt <- sce$sum > 500 & sce$detected > 100
 length(which(!filt))
 sce<-sce[,filt]
 sce
