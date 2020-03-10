@@ -23,14 +23,24 @@ opt = parse_args(opt_parser)
 location <- paste(path_to_mito_filtering, "/sce_objects/post_filtering/",
                   opt$file, "_", opt$model, ".rds", sep="")
 sce <- readRDS(location)
+sce$cutoff <- sce$subsets_mito_percent < opt$percent
+
+# add pseudocounts to each category. It's crude but it allows you to still make
+# a two-way table even if all cells go one way by either metric.
+sce_short <- subset(colData(sce),select=c("keep","cutoff"))
+pseudocounts <- data.frame(keep=c("FALSE","FALSE","TRUE","TRUE"),cutoff=c("TRUE","FALSE","TRUE","FALSE"))
+sce_short <- rbind(sce_short,pseudocounts)
 
 # create two-way table
-sce$cutoff <- sce$subsets_mito_percent < opt$percent
-x <- table(sce$cutoff,sce$keep)
+x <- table(sce_short$cutoff,sce_short$keep)
 rownames(x) <- c("Cutoff removes", "Cutoff keeps")
 colnames(x) <- c("\tModel removes", "Model keeps")
+
+# remove pseudocounts
+x <- x - 1
 
 # save to file
 outfile <- paste(path_to_mito_filtering, "/tables/", opt$file,
                   "_", opt$model, "_cutoff_", opt$percent, ".txt", sep="")
 write.table(x, file=outfile, quote=F, sep="\t")
+

@@ -52,7 +52,7 @@ cutoff <- runUMAP(cutoff,
                   BPPARAM = BiocParallel::MulticoreParam(),
                   min_dist = 0.5,  repulsion_strength = 0.25,
                   spread = 0.7,
-                  n_neighbors = 15)
+                  n_neighbors = min(15,ncol(cutoff)))
 
 png(paste(path_to_mito_filtering, "/plots/", opt$file, "_UMAP_cutoff_",
           opt$percent, "_only.png", sep=""),width=800, height=800)
