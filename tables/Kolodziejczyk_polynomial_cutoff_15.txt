@@ -1,0 +1,3 @@
+	Model removes	Model keeps
+Cutoff removes	27	14
+Cutoff keeps	9	1287
