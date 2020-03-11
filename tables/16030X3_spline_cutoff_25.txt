@@ -1,3 +1,3 @@
 	Model removes	Model keeps
-Cutoff removes	320	294
+Cutoff removes	270	344
 Cutoff keeps	0	1043

@@ -25,6 +25,40 @@ location <- paste(path_to_mito_filtering, "/sce_objects/post_filtering/",
 sce <- readRDS(location)
 sce$cutoff <- sce$subsets_mito_percent < opt$percent
 
+colData(sce)$category<-factor("both_keep",levels=c("both_keep","model_keep","cutoff_keep","both_remove"))
+
+if(sum(colData(sce)$keep==T & colData(sce)$cutoff==T)>0){
+  print("yay!")
+  colData(sce)[colData(sce)$keep==T & colData(sce)$cutoff==T,]$category<-"both_keep"
+} 
+if(sum(colData(sce)$keep==T & colData(sce)$cutoff==F)>0){
+  print("yes!")
+  colData(sce)[colData(sce)$keep==T & colData(sce)$cutoff==F,]$category<-"model_keep"
+}
+if(sum(colData(sce)$keep==F & colData(sce)$cutoff==T)>0){
+  print("hao!")
+  colData(sce)[colData(sce)$keep==F & colData(sce)$cutoff==T,]$category<-"cutoff_keep"
+}
+if(sum(colData(sce)$keep==F & colData(sce)$cutoff==F)>0){
+  print("molto bene!")
+  colData(sce)[colData(sce)$keep==F & colData(sce)$cutoff==F,]$category<-"both_remove"
+}
+
+# Plot full UMAP embedding
+set.seed(617)
+sce <- runUMAP(sce,
+               BNPARAM = BiocNeighbors::AnnoyParam(),
+               BPPARAM = BiocParallel::MulticoreParam(),
+               min_dist = 0.5,  repulsion_strength = 0.25,
+               spread = 0.7,
+               n_neighbors = 15)
+
+png(paste(path_to_mito_filtering, "/plots/UMAP_", opt$file,
+          "_", opt$model, "_cutoff_", opt$percent, 
+          ".png",sep=""),width=800, height=800)
+plotUMAP(sce,colour_by="category")
+dev.off()
+
 # add pseudocounts to each category. It's crude but it allows you to still make
 # a two-way table even if all cells go one way by either metric.
 sce_short <- subset(colData(sce),select=c("keep","cutoff"))
