@@ -1,8 +1,11 @@
 ## Since we don't have ground truth labels for our data or the public data,
 ## we have to use more qualitative metrics to assess if our method is "better"
 ## than a simple cutoff at percent mitochondrial reads. This script generates
-## a UMAP plot of the unfiltered data and shows which cells would be kept by
-## our model, and what they would look like in a UMAP embedding on their own.
+## a UMAP plot of the unfiltered data, to see if the cells being thrown out
+## cluster together or are spread throughout the UMAP space. Then, it generates
+## a new UMAP embedding using only the kept data and plots that. Ideally, we
+## would be able to see some qualitative improvement in the "cleanness" of the
+## model UMAP compared to the simple cutoff UMAP.
 
 suppressPackageStartupMessages({
   library(optparse)
