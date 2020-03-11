@@ -1,0 +1,757 @@
+---
+title: "Pre-processing public data"
+author: "Ariel Hippen Anderson"
+date: "3/6/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+suppressPackageStartupMessages({
+  library(scRNAseq)
+  library(scater)
+  library(biomaRt)
+})
+
+source("config.R")
+```
+
+## AztekinTailData
+
+```{r}
+sce <- AztekinTailData()
+sce
+colData(sce)
+```
+According to the scRNAseq reference, this is data from Xenopus frogs, and there's no gene info for these in biomaRt, so I'm going to exclude this dataset.
+
+## BatchMammaryData
+
+```{r}
+sce <- BachMammaryData()
+sce
+rowData(sce)
+rownames(sce) <- rowData(sce)$Ensembl
+```
+
+This has mouse ensembl gene ids, so we can use BiomaRt to get which genes are mitochondrial directly.
+
+```{r}
+mouse_mart <- useEnsembl("ENSEMBL_MART_ENSEMBL", "mmusculus_gene_ensembl", mirror="uswest")
+id_map <- getBM(values = rowData(sce)$Ensembl,
+                filters = "ensembl_gene_id",
+                attributes = c("ensembl_gene_id", "external_gene_name", "chromosome_name"),
+                mart = mouse_mart)
+table(id_map$chromosome_name)
+```
+There's 13 mitochondrial genes, so we can go ahead with our analysis.
+
+```{r}
+mt_genes <- subset(id_map,id_map$chromosome_name=="MT")$ensembl_gene_id
+feature_ctrls <- list(mito = mt_genes)
+
+
+#run scater
+sce <- addPerCellQC(sce, subsets = feature_ctrls,
+                    BPPARAM = BiocParallel::MulticoreParam())
+
+sce <- addPerFeatureQC(sce, BPPARAM = BiocParallel::MulticoreParam())
+
+# normalize counts for UMAP
+sce <- logNormCounts(sce)
+
+#remove worst cells
+filt <- sce$sum > 500 & sce$detected > 100
+length(which(!filt))
+sce<-sce[,filt]
+
+#save object
+filename <- paste("Bach.rds", sep="")
+filepath <- paste(path_to_mito_filtering, "sce_objects",
+                  "pre_filtering", filename, sep="/")
+saveRDS(sce, file=filepath)
+```
+
+## BaronPancreasData
+
+```{r}
+sce <- BaronPancreasData()
+sce
+```
+
+These look like standard HGNC gene symbols, so I'll try using biomaRt to get chromosome information.
+
+```{r}
+human_mart <- useEnsembl("ENSEMBL_MART_ENSEMBL", "hsapiens_gene_ensembl", mirror="uswest")
+id_map <- getBM(values = rownames(sce),
+                filters = "hgnc_symbol",
+                attributes = c("ensembl_gene_id", "hgnc_symbol", "chromosome_name"),
+                mart = human_mart)
+table(id_map$chromosome_name)
+```
+
+No mitochondrial genes, so we'll ignore for now.
+
+## BuettnerESCData
+
+```{r}
+sce <- BuettnerESCData()
+sce
+```
+
+Mouse ensembl genes, we know what to do with these.
+
+```{r}
+id_map <- getBM(values = rownames(sce),
+                filters = "ensembl_gene_id",
+                attributes = c("ensembl_gene_id", "external_gene_name", "chromosome_name"),
+                mart = mouse_mart)
+table(id_map$chromosome_name)
+```
+
+37 mitochondrial genes, so we'll preprocess and use this set.
+
+```{r}
+mt_genes <- subset(id_map,id_map$chromosome_name=="MT")$ensembl_gene_id
+feature_ctrls <- list(mito = mt_genes)
+
+
+#run scater
+sce <- addPerCellQC(sce, subsets = feature_ctrls,
+                    BPPARAM = BiocParallel::MulticoreParam())
+
+sce <- addPerFeatureQC(sce, BPPARAM = BiocParallel::MulticoreParam())
+
+# normalize counts for UMAP
+sce <- logNormCounts(sce)
+
+#remove worst cells
+filt <- sce$sum > 500 & sce$detected > 100
+length(which(!filt))
+sce<-sce[,filt]
+
+#save object
+filename <- paste("Buettner.rds", sep="")
+filepath <- paste(path_to_mito_filtering, "sce_objects",
+                  "pre_filtering", filename, sep="/")
+saveRDS(sce, file=filepath)
+```
+
+## CampbellBrainData
+
+```{r}
+sce <- CampbellBrainData()
+sce
+```
+
+After a lot of googling, I've found that these are MGI symbols, so I can get biomart to convert them to something I understand.
+
+```{r}
+id_map <- getBM(values = rownames(sce),
+                filters = "mgi_symbol",
+                attributes = c("ensembl_gene_id", "mgi_symbol", "chromosome_name"),
+                mart = mouse_mart)
+table(id_map$chromosome_name)
+```
+30 mitochondrial genes, let's keep it.
+
+```{r}
+mt_genes <- subset(id_map,id_map$chromosome_name=="MT")$mgi_symbol
+feature_ctrls <- list(mito = mt_genes)
+
+
+#run scater
+sce <- addPerCellQC(sce, subsets = feature_ctrls,
+                    BPPARAM = BiocParallel::MulticoreParam())
+
+sce <- addPerFeatureQC(sce, BPPARAM = BiocParallel::MulticoreParam())
+
+# normalize counts for UMAP
+sce <- logNormCounts(sce)
+
+#remove worst cells
+filt <- sce$sum > 500 & sce$detected > 100
+length(which(!filt))
+sce<-sce[,filt]
+
+#save object
+filename <- paste("Campbell.rds", sep="")
+filepath <- paste(path_to_mito_filtering, "sce_objects",
+                  "pre_filtering", filename, sep="/")
+saveRDS(sce, file=filepath)
+```
+
+## Chen Brain Data
+
+```{r}
+sce <- ChenBrainData()
+sce
+```
+
+```{r}
+id_map <- getBM(values = rownames(sce),
+                filters = "mgi_symbol",
+                attributes = c("ensembl_gene_id", "mgi_symbol", "chromosome_name"),
+                mart = mouse_mart)
+table(id_map$chromosome_name)
+```
+No mitochondrial genes, moving on.
+
+## GrunHSCData
+
+This is nice, it actually already includes the chromosome number, no need for biomaRt.
+
+```{r}
+sce <- GrunHSCData()
+sce
+
+table(rowData(sce)$chr)
+```
+
+No mitochondrial genes, though.
+
+## GrunPancreasData
+
+```{r}
+sce <- GrunPancreasData()
+sce
+
+table(rowData(sce)$chr)
+```
+
+No mitochondrial genes.
+
+## KolodziejczykESCData
+
+```{r}
+sce <- KolodziejczykESCData()
+sce
+```
+
+Ensembl gene ids, so we can use biomaRt.
+
+```{r}
+id_map <- getBM(values = rownames(sce),
+                filters = "ensembl_gene_id",
+                attributes = c("ensembl_gene_id", "hgnc_symbol", "chromosome_name"),
+                mart = human_mart)
+table(id_map$chromosome_name)
+```
+
+```{r}
+mt_genes <- subset(id_map,id_map$chromosome_name=="MT")$ensembl_gene_id
+feature_ctrls <- list(mito = mt_genes)
+
+
+#run scater
+sce <- addPerCellQC(sce, subsets = feature_ctrls,
+                    BPPARAM = BiocParallel::MulticoreParam())
+
+sce <- addPerFeatureQC(sce, BPPARAM = BiocParallel::MulticoreParam())
+
+# normalize counts for UMAP
+sce <- logNormCounts(sce)
+
+#remove worst cells
+filt <- sce$sum > 500 & sce$detected > 100
+length(which(!filt))
+sce<-sce[,filt]
+
+#save object
+filename <- paste("Kolodziejczyk.rds", sep="")
+filepath <- paste(path_to_mito_filtering, "sce_objects",
+                  "pre_filtering", filename, sep="/")
+saveRDS(sce, file=filepath)
+```
+
+## LaMannoBrainData
+
+```{r}
+sce <- LaMannoBrainData()
+sce
+```
+
+These look like gene symbols, so I'm going to try biomaRt to extract chromosome number.
+
+```{r}
+id_map <- getBM(values = rownames(sce),
+                filters = "hgnc_symbol",
+                attributes = c("ensembl_gene_id", "hgnc_symbol", "chromosome_name"),
+                mart = human_mart)
+table(id_map$chromosome_name)
+```
+
+No mitochondrial genes, moving on.
+
+## LawlorPancreasData
+
+```{r}
+sce <- LawlorPancreasData()
+sce
+```
+
+```{r}
+id_map <- getBM(values = rownames(sce),
+                filters = "ensembl_gene_id",
+                attributes = c("ensembl_gene_id", "hgnc_symbol", "chromosome_name"),
+                mart = human_mart)
+table(id_map$chromosome_name)
+```
+
+```{r}
+mt_genes <- subset(id_map,id_map$chromosome_name=="MT")$ensembl_gene_id
+feature_ctrls <- list(mito = mt_genes)
+
+
+#run scater
+sce <- addPerCellQC(sce, subsets = feature_ctrls,
+                    BPPARAM = BiocParallel::MulticoreParam())
+
+sce <- addPerFeatureQC(sce, BPPARAM = BiocParallel::MulticoreParam())
+
+# normalize counts for UMAP
+sce <- logNormCounts(sce)
+
+#remove worst cells
+filt <- sce$sum > 500 & sce$detected > 100
+length(which(!filt))
+sce<-sce[,filt]
+
+#save object
+filename <- paste("Lawlor.rds", sep="")
+filepath <- paste(path_to_mito_filtering, "sce_objects",
+                  "pre_filtering", filename, sep="/")
+saveRDS(sce, file=filepath)
+```
+
+
+## LengESCData
+
+```{r}
+sce <- LengESCData()
+sce
+```
+
+Gene symbols, will try biomaRt
+
+```{r}
+id_map <- getBM(values = rownames(sce),
+                filters = "hgnc_symbol",
+                attributes = c("ensembl_gene_id", "hgnc_symbol", "chromosome_name"),
+                mart = human_mart)
+table(id_map$chromosome_name)
+```
+
+No mitochondrial genes.
+
+## LunSpikeInData
+
+```{r}
+sce <- LunSpikeInData()
+sce
+```
+
+```{r}
+id_map <- getBM(values = rownames(sce),
+                filters = "ensembl_gene_id",
+                attributes = c("ensembl_gene_id", "external_gene_name", "chromosome_name"),
+                mart = mouse_mart)
+table(id_map$chromosome_name)
+```
+
+```{r}
+mt_genes <- subset(id_map,id_map$chromosome_name=="MT")$ensembl_gene_id
+feature_ctrls <- list(mito = mt_genes)
+
+
+#run scater
+sce <- addPerCellQC(sce, subsets = feature_ctrls,
+                    BPPARAM = BiocParallel::MulticoreParam())
+
+sce <- addPerFeatureQC(sce, BPPARAM = BiocParallel::MulticoreParam())
+
+# normalize counts for UMAP
+sce <- logNormCounts(sce)
+
+#remove worst cells
+filt <- sce$sum > 500 & sce$detected > 100
+length(which(!filt))
+sce<-sce[,filt]
+
+#save object
+filename <- paste("Lun.rds", sep="")
+filepath <- paste(path_to_mito_filtering, "sce_objects",
+                  "pre_filtering", filename, sep="/")
+saveRDS(sce, file=filepath)
+```
+
+## MacoskoRetinaData
+
+```{r}
+sce <- MacoskoRetinaData()
+sce
+```
+```{r}
+id_map <- getBM(values = rownames(sce),
+                filters = "external_gene_name",
+                attributes = c("ensembl_gene_id", "external_gene_name", "chromosome_name"),
+                mart = mouse_mart)
+table(id_map$chromosome_name)
+```
+
+```{r}
+mt_genes <- toupper(subset(id_map,id_map$chromosome_name=="MT")$external_gene_name)
+feature_ctrls <- list(mito = mt_genes)
+
+
+#run scater
+sce <- addPerCellQC(sce, subsets = feature_ctrls,
+                    BPPARAM = BiocParallel::MulticoreParam())
+
+sce <- addPerFeatureQC(sce, BPPARAM = BiocParallel::MulticoreParam())
+
+# normalize counts for UMAP
+sce <- logNormCounts(sce)
+
+#remove worst cells
+filt <- sce$sum > 500 & sce$detected > 100
+length(which(!filt))
+sce<-sce[,filt]
+
+#save object
+filename <- paste("Macosko.rds", sep="")
+filepath <- paste(path_to_mito_filtering, "sce_objects",
+                  "pre_filtering", filename, sep="/")
+saveRDS(sce, file=filepath)
+```
+
+## MarquesBrainData
+
+```{r}
+sce <- MarquesBrainData()
+sce
+```
+
+```{r}
+id_map <- getBM(values = rownames(sce),
+                filters = "external_gene_name",
+                attributes = c("ensembl_gene_id", "external_gene_name", "chromosome_name"),
+                mart = mouse_mart)
+table(id_map$chromosome_name)
+```
+
+No mitochondrial genes.
+
+## MessmerESCData
+
+```{r}
+sce <- MessmerESCData()
+sce
+```
+
+```{r}
+id_map <- getBM(values = rownames(sce),
+                filters = "ensembl_gene_id",
+                attributes = c("ensembl_gene_id", "hgnc_symbol", "chromosome_name"),
+                mart = human_mart)
+table(id_map$chromosome_name)
+```
+
+```{r}
+mt_genes <- subset(id_map,id_map$chromosome_name=="MT")$ensembl_gene_id
+feature_ctrls <- list(mito = mt_genes)
+
+
+#run scater
+sce <- addPerCellQC(sce, subsets = feature_ctrls,
+                    BPPARAM = BiocParallel::MulticoreParam())
+
+sce <- addPerFeatureQC(sce, BPPARAM = BiocParallel::MulticoreParam())
+
+# normalize counts for UMAP
+sce <- logNormCounts(sce)
+
+#remove worst cells
+filt <- sce$sum > 500 & sce$detected > 100
+length(which(!filt))
+sce<-sce[,filt]
+
+#save object
+filename <- paste("Messmer.rds", sep="")
+filepath <- paste(path_to_mito_filtering, "sce_objects",
+                  "pre_filtering", filename, sep="/")
+saveRDS(sce, file=filepath)
+```
+
+## MuranoPancreasData
+
+```{r}
+sce <- MuraroPancreasData()
+sce
+table(rowData(sce)$chr)
+```
+
+Already has chromosome information, nice. But no mitochondrial genes.
+
+## NestorowaHSCData
+
+```{r}
+sce <- NestorowaHSCData()
+sce
+```
+
+```{r}
+id_map <- getBM(values = rownames(sce),
+                filters = "ensembl_gene_id",
+                attributes = c("ensembl_gene_id", "external_gene_name", "chromosome_name"),
+                mart = mouse_mart)
+table(id_map$chromosome_name)
+```
+
+```{r}
+mt_genes <- subset(id_map,id_map$chromosome_name=="MT")$ensembl_gene_id
+feature_ctrls <- list(mito = mt_genes)
+
+
+#run scater
+sce <- addPerCellQC(sce, subsets = feature_ctrls,
+                    BPPARAM = BiocParallel::MulticoreParam())
+
+sce <- addPerFeatureQC(sce, BPPARAM = BiocParallel::MulticoreParam())
+
+# normalize counts for UMAP
+sce <- logNormCounts(sce)
+
+#remove worst cells
+filt <- sce$sum > 500 & sce$detected > 100
+length(which(!filt))
+sce<-sce[,filt]
+
+#save object
+filename <- paste("Nestorowa.rds", sep="")
+filepath <- paste(path_to_mito_filtering, "sce_objects",
+                  "pre_filtering", filename, sep="/")
+saveRDS(sce, file=filepath)
+```
+
+## ReprocessedAllenData
+
+```{r}
+sce <- ReprocessedAllenData()
+sce
+```
+
+```{r}
+id_map <- getBM(values = rownames(sce),
+                filters = "mgi_symbol",
+                attributes = c("ensembl_gene_id", "mgi_symbol", "chromosome_name"),
+                mart = mouse_mart)
+table(id_map$chromosome_name)
+```
+
+No mitochondrial genes.
+
+## RichardTCellData
+
+```{r}
+sce <- RichardTCellData()
+sce
+```
+
+```{r}
+id_map <- getBM(values = rownames(sce),
+                filters = "ensembl_gene_id",
+                attributes = c("ensembl_gene_id", "mgi_symbol", "chromosome_name"),
+                mart = mouse_mart)
+table(id_map$chromosome_name)
+```
+
+```{r}
+mt_genes <- subset(id_map,id_map$chromosome_name=="MT")$ensembl_gene_id
+feature_ctrls <- list(mito = mt_genes)
+
+
+#run scater
+sce <- addPerCellQC(sce, subsets = feature_ctrls,
+                    BPPARAM = BiocParallel::MulticoreParam())
+
+sce <- addPerFeatureQC(sce, BPPARAM = BiocParallel::MulticoreParam())
+
+# normalize counts for UMAP
+sce <- logNormCounts(sce)
+
+#remove worst cells
+filt <- sce$sum > 500 & sce$detected > 100
+length(which(!filt))
+sce<-sce[,filt]
+
+#save object
+filename <- paste("Richard.rds", sep="")
+filepath <- paste(path_to_mito_filtering, "sce_objects",
+                  "pre_filtering", filename, sep="/")
+saveRDS(sce, file=filepath)
+```
+
+## RomanovBrainData
+```{r}
+sce <- RomanovBrainData()
+sce
+```
+
+```{r}
+id_map <- getBM(values = rownames(sce),
+                filters = "external_gene_name",
+                attributes = c("ensembl_gene_id", "external_gene_name", "chromosome_name"),
+                mart = mouse_mart)
+table(id_map$chromosome_name)
+```
+No mito genes.
+
+## SegerstolpePancreasData
+
+```{r}
+sce <- SegerstolpePancreasData()
+sce
+```
+
+```{r}
+id_map <- getBM(values = rownames(sce),
+                filters = "hgnc_symbol",
+                attributes = c("ensembl_gene_id", "hgnc_symbol", "chromosome_name"),
+                mart = human_mart)
+table(id_map$chromosome_name)
+```
+
+No mito genes.
+
+## ShekharRetinaData
+
+```{r}
+sce <- ShekharRetinaData()
+sce
+```
+MGI symbols
+
+```{r}
+id_map <- getBM(values = rownames(sce),
+                filters = "mgi_symbol",
+                attributes = c("ensembl_gene_id", "mgi_symbol", "chromosome_name"),
+                mart = mouse_mart)
+table(id_map$chromosome_name)
+```
+
+```{r}
+mt_genes <- subset(id_map,id_map$chromosome_name=="MT")$mgi_symbol
+feature_ctrls <- list(mito = mt_genes)
+
+
+#run scater
+sce <- addPerCellQC(sce, subsets = feature_ctrls,
+                    BPPARAM = BiocParallel::MulticoreParam())
+
+sce <- addPerFeatureQC(sce, BPPARAM = BiocParallel::MulticoreParam())
+
+# normalize counts for UMAP
+sce <- logNormCounts(sce)
+
+#remove worst cells
+filt <- sce$sum > 500 & sce$detected > 100
+length(which(!filt))
+sce<-sce[,filt]
+
+#save object
+filename <- paste("Shekhar.rds", sep="")
+filepath <- paste(path_to_mito_filtering, "sce_objects",
+                  "pre_filtering", filename, sep="/")
+saveRDS(sce, file=filepath)
+```
+
+## TasicBrainData
+
+```{r}
+sce <- TasicBrainData()
+sce
+```
+
+```{r}
+id_map <- getBM(values = rownames(sce),
+                filters = "mgi_symbol",
+                attributes = c("ensembl_gene_id", "mgi_symbol", "chromosome_name"),
+                mart = mouse_mart)
+table(id_map$chromosome_name)
+```
+
+No mito data.
+
+## UsoskinBrainData
+
+```{r}
+sce <- UsoskinBrainData()
+sce
+```
+
+Only has rpm, no counts matrix, so ignoring for now.
+
+## XinPancreasData
+
+```{r}
+sce <- XinPancreasData()
+sce
+```
+
+```{r}
+rownames(sce)<-rowData(sce)$symbol
+id_map <- getBM(values = rownames(sce),
+                filters = "hgnc_symbol",
+                attributes = c("ensembl_gene_id", "hgnc_symbol", "chromosome_name"),
+                mart = human_mart)
+table(id_map$chromosome_name)
+```
+
+No mito genes.
+
+## ZeiselBrainData
+
+```{r}
+sce <- ZeiselBrainData()
+sce
+```
+
+```{r}
+id_map <- getBM(values = rownames(sce),
+                filters = "external_gene_name",
+                attributes = c("ensembl_gene_id", "external_gene_name", "chromosome_name"),
+                mart = mouse_mart)
+table(id_map$chromosome_name)
+```
+
+```{r}
+mt_genes <- subset(id_map,id_map$chromosome_name=="MT")$external_gene_name
+feature_ctrls <- list(mito = mt_genes)
+
+
+#run scater
+sce <- addPerCellQC(sce, subsets = feature_ctrls,
+                    BPPARAM = BiocParallel::MulticoreParam())
+
+sce <- addPerFeatureQC(sce, BPPARAM = BiocParallel::MulticoreParam())
+
+# normalize counts for UMAP
+sce <- logNormCounts(sce)
+
+#remove worst cells
+filt <- sce$sum > 500 & sce$detected > 100
+length(which(!filt))
+sce<-sce[,filt]
+
+#save object
+filename <- paste("Zeisel.rds", sep="")
+filepath <- paste(path_to_mito_filtering, "sce_objects",
+                  "pre_filtering", filename, sep="/")
+saveRDS(sce, file=filepath)
+```
+
+Whew! To recap, we now have 12 public datasets we can test our filtering method on.
