@@ -12,20 +12,21 @@ suppressPackageStartupMessages({
   library(SingleCellExperiment)
   library(ggplot2)
   library(scater)
+  library(scran)
 })
 
 source("config.R")
 
-option_list = list(
-  make_option(c("-f", "--file"), type="character", default="16030X2"),
-  make_option(c("-m", "--model"), type="character", default="linear")
+option_list <- list(
+  make_option(c("-f", "--file"), type = "character", default = "16030X4"),
+  make_option(c("-m", "--model"), type = "character", default = "linear")
 )
-opt_parser = OptionParser(option_list=option_list)
-opt = parse_args(opt_parser)
+opt_parser <- OptionParser(option_list = option_list)
+opt <- parse_args(opt_parser)
 
 # load data
 location <- paste(path_to_mito_filtering, "/sce_objects/post_filtering/",
-                  opt$file, "_", opt$model, ".rds", sep="")
+                  opt$file, "_", opt$model, ".rds", sep = "")
 sce <- readRDS(location)
 
 
@@ -39,22 +40,22 @@ sce <- runUMAP(sce,
                n_neighbors = 15)
 
 png(paste(path_to_mito_filtering, "/plots/", opt$file,
-          "_UMAP.png",sep=""),width=800, height=800)
-plotUMAP(sce, colour_by="subsets_mito_percent")
+          "_UMAP.png", sep = ""), width = 800, height = 800)
+plotUMAP(sce, colour_by = "subsets_mito_percent")
 dev.off()
 
 
 # Plot full UMAP colored by which cells kept
-justkeep <- sce[,sce$keep==T]
 png(paste(path_to_mito_filtering, "/plots/", opt$file, "_UMAP_", opt$model,
-          ".png", sep=""),width=800, height=800)
-plotUMAP(sce, colour_by="keep")
+          ".png", sep = ""), width = 800, height = 800)
+plotUMAP(sce, colour_by = "keep") +
+  scale_fill_manual(values = c("#999999", "#E69F00"))
 dev.off()
 
 
 # Plot UMAP embedding with only kept cells
 set.seed(617)
-justkeep <- sce[,sce$keep==T]
+justkeep <- sce[, sce$keep == T]
 justkeep <- runUMAP(justkeep,
                BNPARAM = BiocNeighbors::AnnoyParam(),
                BPPARAM = BiocParallel::MulticoreParam(),
@@ -63,7 +64,20 @@ justkeep <- runUMAP(justkeep,
                n_neighbors = 15)
 
 png(paste(path_to_mito_filtering, "/plots/", opt$file, "_UMAP_", opt$model,
-          "_only.png", sep=""), width=800, height=800)
+          "_only.png", sep = ""), width = 800, height = 800)
 plotUMAP(justkeep)
 dev.off()
 
+set.seed(617)
+g <- buildSNNGraph(justkeep,
+                   k = 30,   # higher = bigger clusters
+                   BNPARAM = BiocNeighbors::AnnoyParam(),
+                   BPPARAM = BiocParallel::MulticoreParam())
+clusters <- as.factor(igraph::cluster_louvain(g)$membership)
+justkeep$clusters <- clusters
+saveRDS(justkeep, paste(path_to_mito_filtering, "/sce_objects/",
+                        opt$file, "_clustering.rds", sep = ""))
+png(paste(path_to_mito_filtering, "/plots/", opt$file, "_clustering_",
+              opt$model, ".png", sep = ""), width = 800, height = 800)
+plotUMAP(justkeep, colour_by = "clusters")
+dev.off()

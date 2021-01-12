@@ -20,7 +20,7 @@ Rscript prepare_our_data.R -f 16030X2
 Rscript prepare_our_data.R -f 16030X3
 Rscript prepare_our_data.R -f 16030X4
 
-samples=('16030X2' '16030X3' '16030X4' 'Bach' 'Buettner' 'Campbell' 'Kolodziejczyk' 'Lawlor' 'Macosko' 'Messmer' 'Richard' 'Shekhar' 'Zeisel')
+samples=('16030X2' '16030X3' '16030X4' 'H094_pOme' 'H095_pOvaR' 'H117_pTum1' 'H122_pTum1'  'Bach' 'Buettner' 'Campbell' 'Kolodziejczyk' 'Lawlor' 'Macosko' 'Messmer' 'Richard' 'Shekhar' 'Wang' 'Zeisel')
 models=('linear' 'spline' 'polynomial')
 cutoffs=(10 15 20 25)
 

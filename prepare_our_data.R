@@ -15,22 +15,24 @@ suppressPackageStartupMessages({
 
 source("config.R")
 
-option_list = list(
-  make_option(c("-f", "--file"), type="character", default="16030X2")
+option_list <- list(
+  make_option(c("-f", "--file"), type = "character", default = "16030X2")
 )
-opt_parser = OptionParser(option_list=option_list)
-opt = parse_args(opt_parser)
+opt_parser <- OptionParser(option_list = option_list)
+opt <- parse_args(opt_parser)
 
 # load data into sce object
-filename <- paste(path_to_hgsc_data, "tumors", opt$file, "alevin_output/alevin/quants_mat.gz",sep="/")
+filename <- paste(path_to_hgsc_data, "tumors", opt$file,
+                  "alevin_output/alevin/quants_mat.gz", sep = "/")
 txia <- suppressMessages(tximport(
   paste(path_to_hgsc_data, "tumors", opt$file,
-        "alevin_output/alevin/quants_mat.gz",sep="/"),
+        "alevin_output/alevin/quants_mat.gz", sep = "/"),
   type = "alevin"))
 sce <- SingleCellExperiment(assays = list(counts = txia$counts))
 
 # convert ensembl gene ids to gene symbols
-gene_map <- fread(paste(path_to_hgsc_data,"index","gene2symbol.tsv",sep="/"), header = F)
+gene_map <- fread(paste(path_to_hgsc_data,
+                        "index", "gene2symbol.tsv", sep = "/"), header = F)
 setnames(gene_map, c("ensembl_id", "gene_symbol"))
 rowData(sce)$ensembl_id <- rownames(sce)
 rowData(sce) <- left_join(as.data.frame(rowData(sce)), gene_map)
@@ -55,11 +57,11 @@ sce <- logNormCounts(sce)
 # remove unambiguously failed cells
 filt <- sce$sum > 500 & sce$detected > 100
 length(which(!filt))
-sce<-sce[,filt]
+sce <- sce[, filt]
 sce
 
 #save object
-filename <- paste(opt$file, ".rds", sep="")
+filename <- paste(opt$file, ".rds", sep = "")
 filepath <- paste(path_to_mito_filtering, "sce_objects",
-                  "pre_filtering", filename, sep="/")
-saveRDS(sce, file=filepath)
+                  "pre_filtering", filename, sep = "/")
+saveRDS(sce, file = filepath)
