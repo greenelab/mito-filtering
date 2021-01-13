@@ -16,7 +16,7 @@ suppressPackageStartupMessages({
 
 source("config.R")
 
-counts <- readRDS("~/Downloads/GSE111976_ct_endo_10x.rds")
+counts <- readRDS("GSE111976_ct_endo_10x.rds")
 sce <- SingleCellExperiment(list(counts = counts))
 dim(sce)
 rm(counts); gc()
