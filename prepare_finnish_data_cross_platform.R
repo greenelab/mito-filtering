@@ -1,6 +1,6 @@
 ## In order to compare the results from cellranger and alevin, a colleague at
 ## University of Helsinki resent their tumor data as quantified by the two
-## platforms. This is converting the objects sent from Seurat to sce objects
+## platforms. This is converting from the Seurat objects sent to sce objects
 ## and processing them with scater for use in miQC.
 
 suppressPackageStartupMessages({

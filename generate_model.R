@@ -24,7 +24,7 @@ source("config.R")
 option_list <- list(
   make_option(c("-f", "--file"), type = "character", default = "16030X2"),
   make_option(c("-m", "--model"), type = "character", default = "linear"),
-  make_option(c("-c", "--cutoff"), type = "numeric", default = 0.75)
+  make_option(c("-p", "--posterior"), type = "numeric", default = 0.75)
 )
 opt_parser <- OptionParser(option_list = option_list)
 opt <- parse_args(opt_parser)
@@ -100,7 +100,7 @@ dev.off()
 # determine which cells to keep
 png(paste(path_to_mito_filtering, "/plots/", opt$file, "_",
           opt$model, "_keep.png", sep = ""), width = 1200, height = 800)
-metrics$keep <- metrics$probability_dead <= opt$cutoff
+metrics$keep <- metrics$probability_dead <= opt$posterior
 ggplot(metrics, aes(x = detected, y = subsets_mito_percent, colour = keep)) +
   scale_color_manual(values = c("#999999", "#E69F00")) +
   labs(x = "Unique genes found", y = "Percent reads mitochondrial") +
