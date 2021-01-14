@@ -12,20 +12,21 @@ suppressPackageStartupMessages({
   library(SingleCellExperiment)
   library(ggplot2)
   library(scater)
+  library(scran)
 })
 
 source("config.R")
 
-option_list = list(
-  make_option(c("-f", "--file"), type="character", default="16030X2"),
-  make_option(c("-p", "--percent"), type="numeric", default=20)
+option_list <- list(
+  make_option(c("-f", "--file"), type = "character", default = "16030X4"),
+  make_option(c("-p", "--percent"), type = "numeric", default = 20)
 )
-opt_parser = OptionParser(option_list=option_list)
-opt = parse_args(opt_parser)
+opt_parser <- OptionParser(option_list = option_list)
+opt <- parse_args(opt_parser)
 
 # load data
 location <- paste(path_to_mito_filtering, "/sce_objects/pre_filtering/",
-                  opt$file, ".rds", sep="")
+                  opt$file, ".rds", sep = "")
 sce <- readRDS(location)
 
 
@@ -40,22 +41,39 @@ sce <- runUMAP(sce,
 
 sce$cutoff_keep <- sce$subsets_mito_percent < opt$percent
 png(paste(path_to_mito_filtering, "/plots/", opt$file, "_UMAP_cutoff_",
-          opt$percent, ".png", sep=""),width=800, height=800)
-plotUMAP(sce, colour_by="cutoff_keep")
+          opt$percent, ".png", sep = ""), width = 800, height = 800)
+plotUMAP(sce, colour_by = "cutoff_keep") +
+  scale_fill_manual(values = c("#999999", "#E69F00")) +
+  ggtitle("Cutoff at 10%") + theme(text = element_text(size = 20))
 dev.off()
+
 
 
 # Get cutoff-kept-only embedding
 set.seed(617)
-cutoff <- sce[,sce$cutoff_keep==T]
+cutoff <- sce[, sce$cutoff_keep == T]
 cutoff <- runUMAP(cutoff,
                   BNPARAM = BiocNeighbors::AnnoyParam(),
                   BPPARAM = BiocParallel::MulticoreParam(),
                   min_dist = 0.5,  repulsion_strength = 0.25,
                   spread = 0.7,
-                  n_neighbors = min(15,ncol(cutoff)))
+                  n_neighbors = min(15, ncol(cutoff)))
 
 png(paste(path_to_mito_filtering, "/plots/", opt$file, "_UMAP_cutoff_",
-          opt$percent, "_only.png", sep=""),width=800, height=800)
+          opt$percent, "_only.png", sep = ""), width = 800, height = 800)
 plotUMAP(cutoff)
+dev.off()
+
+set.seed(617)
+g <- buildSNNGraph(cutoff,
+                   k = 30,   # higher = bigger clusters
+                   BNPARAM = BiocNeighbors::AnnoyParam(),
+                   BPPARAM = BiocParallel::MulticoreParam())
+clusters <- as.factor(igraph::cluster_louvain(g)$membership)
+cutoff$clusters <- clusters
+saveRDS(cutoff, paste(path_to_mito_filtering, "/sce_objects/", opt$file,
+                      "_clustering_cutoff_", opt$percent, ".rds", sep = ""))
+png(paste(path_to_mito_filtering, "/plots/", opt$file, "_clustering_cutoff_",
+          opt$percent, ".png", sep = ""), width = 800, height = 800)
+plotUMAP(cutoff, colour_by = "clusters")
 dev.off()
