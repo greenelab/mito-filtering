@@ -18,9 +18,12 @@ suppressPackageStartupMessages({
   library(grid)
   library(caret)
   library(ggpubr)
+  library(gtable)
+  library(BiocParallel)
 })
 
 source("config.R")
+source("utils.R")
 
 option_list <- list(
   make_option(c("-f", "--file"), type = "character", default = "16030X4"),
@@ -44,85 +47,23 @@ metrics <- as.data.frame(colData(sce))
 # visualize data distribution
 qc_spike2 <- isOutlier(metrics$subsets_mito_percent, type = "higher")
 mad <- attr(qc_spike2, "thresholds")[2]
-p1 <- ggplot(metrics, aes(x = detected, y = subsets_mito_percent)) +
-  geom_point(colour = "#33adff") +
-  geom_hline(yintercept = 5, lwd = 2) +
-  geom_hline(yintercept = mad, linetype = 2, lwd = 2) +
-  labs(x = "Unique genes found", y = "Percent reads mitochondrial") +
-  theme_bw() +
-  theme(text = element_text(size = 18), plot.margin = unit(c(1, 1, 1, 1), "cm"))
+p1 <- plotNoModel(metrics) +
+  geom_hline(yintercept = 5, lwd = line_width) +
+  geom_hline(yintercept = mad, linetype = 2, lwd = line_width)
 
 # run flexmix to get mixture model
-if (opt$model == "linear") {
-  model <- flexmix(subsets_mito_percent~detected, data = metrics, k = 2)
-} else if (opt$model == "spline") {
-  model <- flexmix(subsets_mito_percent~bs(detected), data = metrics, k = 2)
-} else if (opt$model == "polynomial") {
-  model <- flexmix(subsets_mito_percent~poly(detected, degree = 2),
-                   data = metrics, k = 2)
-}
+model <- flexmix(subsets_mito_percent~detected, data = metrics, k = 2)
 
 # plot model parameters on data
 fitted_models <- as.data.frame(cbind(metrics$detected, fitted(model)))
 
-p2 <- ggplot(metrics, aes(x = detected, y = subsets_mito_percent)) +
-  geom_point(colour = "#33adff") +
-  geom_line(data = fitted_models, inherit.aes = F,
-            aes(x = V1, y = Comp.1), lwd = 2) +
-  geom_line(data = fitted_models, inherit.aes = F,
-            aes(x = V1, y = Comp.2), lwd = 2) +
-  labs(x = "Unique genes found", y = "Percent reads mitochondrial") +
-  #ggtitle(opt$file) +
-  theme_bw() +
-  theme(text = element_text(size = 18),
-        plot.margin = unit(c(1, 1, 1, 1), "cm")) +
-  ylim(0, max(metrics$subsets_mito_percent))
+p2 <- plotDistributions(metrics, fitted_models)
 
-
-# Determine which model component is the dead cell distribution,
-# since flexmix doesn't number the distributions deterministically.
-# Dead cell distribution should always have a higher y-intercept than
-# the alive cell distribution, no matter the kind of model used.
-intercept1 <- parameters(model, component = 1)[1]
-intercept2 <- parameters(model, component = 2)[1]
-if (intercept1 > intercept2) {
-  dead_cell_dist <- 1
-} else {
-  dead_cell_dist <- 2
-}
-
-# calculate posterior likelihood for each cell
-post <- posterior(model)
-metrics$probability_dead <- post[, dead_cell_dist]
-
-p3 <- ggplot(metrics, aes(x = detected, y = subsets_mito_percent,
-                          colour = probability_dead)) +
-  labs(x = "Unique genes found", y = "Percent reads mitochondrial",
-       colour = "Probability\ncompromised") +
-  geom_point() +
-  #ggtitle(opt$file) +
-  theme_bw() +
-  theme(text = element_text(size = 18),
-        plot.margin = unit(c(1, 1, 1, 1), "cm")) +
-  geom_line(data = fitted_models, inherit.aes = F, aes(x = V1, y = Comp.1),
-            lwd = 2) +
-  geom_line(data = fitted_models, inherit.aes = F, aes(x = V1, y = Comp.2),
-            lwd = 2) +
-  ylim(0, max(metrics$subsets_mito_percent))
+metrics <- calculatePosterior(metrics, model)
+p3 <- plotPosterior(metrics, fitted_models)
 
 metrics$keep <- metrics$probability_dead <= opt$posterior
-
-p4 <- ggplot(metrics, aes(x = detected, y = subsets_mito_percent,
-                          colour = keep)) +
-  scale_color_manual(values = c("#999999", "#E69F00")) +
-  labs(x = "Unique genes found", y = "Percent reads mitochondrial",
-       colour = "Keep") +
-  geom_point() +
-  #ggtitle(opt$file) +
-  theme_bw() +
-  theme(text = element_text(size = 18), plot.margin = unit(c(1, 1, 1, 1), "cm"))
-
-sce$Keep <- metrics$keep
+p4 <- plotKeepOrToss(metrics)
 
 png("~/Documents/Figures/SmartQC Paper/Figure 1.png",
     width = 5200, height = 3200, res = 300)
@@ -132,76 +73,18 @@ dev.off()
 
 ### SUPPLEMENTAL FIGURE 1
 
-opt$model <- "spline"
 metrics <- as.data.frame(colData(sce))
-
-if (opt$model == "linear") {
-  model <- flexmix(subsets_mito_percent~detected, data = metrics, k = 2)
-} else if (opt$model == "spline") {
-  model <- flexmix(subsets_mito_percent~bs(detected), data = metrics, k = 2)
-} else if (opt$model == "polynomial") {
-  model <- flexmix(subsets_mito_percent~poly(detected, degree = 3),
-                   data = metrics, k = 2)
-}
+model <- flexmix(subsets_mito_percent~bs(detected), data = metrics, k = 2)
 
 # plot model parameters on data
 fitted_models <- as.data.frame(cbind(metrics$detected, fitted(model)))
+k2 <- plotDistributions(metrics, fitted_models)
 
-k2 <- ggplot(metrics, aes(x = detected, y = subsets_mito_percent)) +
-  geom_point(colour = "#33adff") +
-  geom_line(data = fitted_models, inherit.aes = F, aes(x = V1, y = Comp.1),
-            lwd = 2) +
-  geom_line(data = fitted_models, inherit.aes = F, aes(x = V1, y = Comp.2),
-            lwd = 2) +
-  labs(x = "Unique genes found", y = "Percent reads mitochondrial") +
-  #ggtitle(opt$file) +
-  theme_bw() +
-  theme(text = element_text(size = 18),
-        plot.margin = unit(c(1, 1, 1, 1), "cm")) +
-  ylim(0, max(metrics$subsets_mito_percent))
-
-# Determine which model component is the dead cell distribution,
-# since flexmix doesn't number the distributions deterministically.
-# Dead cell distribution should always have a higher y-intercept than
-# the alive cell distribution, no matter the kind of model used.
-intercept1 <- parameters(model, component = 1)[1]
-intercept2 <- parameters(model, component = 2)[1]
-if (intercept1 > intercept2) {
-  dead_cell_dist <- 1
-} else {
-  dead_cell_dist <- 2
-}
-
-# calculate posterior likelihood for each cell
-post <- posterior(model)
-metrics$probability_dead <- post[, dead_cell_dist]
-
-k3 <- ggplot(metrics, aes(x = detected, y = subsets_mito_percent,
-                          colour = probability_dead)) +
-  labs(x = "Unique genes found", y = "Percent reads mitochondrial",
-       colour = "Probability dead") +
-  geom_point() +
-  #ggtitle(opt$file) +
-  theme_bw() +
-  theme(text = element_text(size = 18),
-        plot.margin = unit(c(1, 1, 1, 1), "cm")) +
-  geom_line(data = fitted_models, inherit.aes = F, aes(x = V1, y = Comp.1),
-            lwd = 2) +
-  geom_line(data = fitted_models, inherit.aes = F, aes(x = V1, y = Comp.2),
-            lwd = 2) +
-  ylim(0, max(metrics$subsets_mito_percent))
+metrics <- calculatePosterior(metrics, model)
+k3 <- plotPosterior(metrics, fitted_models)
 
 metrics$keep <- metrics$probability_dead <= opt$posterior
-
-k4 <- ggplot(metrics, aes(x = detected, y = subsets_mito_percent,
-                          colour = keep)) +
-  scale_color_manual(values = c("#999999", "#E69F00")) +
-  labs(x = "Unique genes found", y = "Percent reads mitochondrial",
-       colour = "Keep") +
-  geom_point() +
-  #ggtitle(opt$file) +
-  theme_bw() +
-  theme(text = element_text(size = 18), plot.margin = unit(c(1, 1, 1, 1), "cm"))
+k4 <- plotKeepOrToss(metrics)
 
 png("~/Documents/Figures/SmartQC Paper/Supp Figure 1.png",
     width = 5200, height = 3200, res = 300)
@@ -219,31 +102,8 @@ run_model <- function(file, title) {
   model <- flexmix(subsets_mito_percent~detected, data = metrics, k = 2)
   fitted_models <- as.data.frame(cbind(metrics$detected, fitted(model)))
 
-  intercept1 <- parameters(model, component = 1)[1]
-  intercept2 <- parameters(model, component = 2)[1]
-  if (intercept1 > intercept2) {
-    dead_cell_dist <- 1
-  } else {
-    dead_cell_dist <- 2
-  }
-
-  post <- posterior(model)
-  metrics$probability_dead <- post[, dead_cell_dist]
-
-  p <- ggplot(metrics, aes(x = detected, y = subsets_mito_percent,
-                           colour = probability_dead)) +
-    labs(x = "Unique genes found", y = "Percent reads mitochondrial",
-         colour = "Probability\ncompromised") +
-    geom_point() +
-    ggtitle(title) +
-    theme_bw() +
-    theme(text = element_text(size = 18),
-          plot.margin = unit(c(1, 1, 1, 1), "cm")) +
-    geom_line(data = fitted_models, inherit.aes = F, aes(x = V1, y = Comp.1),
-              lwd = 2) +
-    geom_line(data = fitted_models, inherit.aes = F, aes(x = V1, y = Comp.2),
-              lwd = 2) +
-    ylim(0, max(metrics$subsets_mito_percent))
+  metrics <- calculatePosterior(metrics, model)
+  p <- plotPosterior(metrics, fitted_models, title)
 
   p
 }
@@ -278,6 +138,7 @@ dev.off()
 
 ### FIGURE 4
 
+# Plot data as quantified by cellranger
 location <- paste(path_to_mito_filtering, "/sce_objects/post_filtering/",
                   "H117_pTum1_cellranger_linear.rds", sep = "")
 cellranger <- readRDS(location)
@@ -285,55 +146,20 @@ metrics <- as.data.frame(colData(cellranger))
 model <- flexmix(subsets_mito_percent~detected, data = metrics, k = 2)
 fitted_models <- as.data.frame(cbind(metrics$detected, fitted(model)))
 
+t1 <- plotDistributions(metrics, fitted_models, title = "Cellranger")
+t5 <- plotNoModel(metrics, title = "Cellranger") +
+  geom_hline(yintercept = opt$cutoff, lwd = line_width) + ylim(1, 100)
 
-t1 <- ggplot(metrics, aes(x = detected, y = subsets_mito_percent)) +
-  geom_point(colour = "#33adff") +
-  labs(x = "Unique genes found", y = "Percent reads mitochondrial") +
-  ggtitle("Cellranger") +
-  theme_bw() +
-  geom_line(data = fitted_models, inherit.aes = F,
-            aes(x = V1, y = Comp.1), lwd = 2) +
-  geom_line(data = fitted_models, inherit.aes = F,
-            aes(x = V1, y = Comp.2), lwd = 2) +
-  theme(text = element_text(size = 18),
-        plot.margin = unit(c(1, 1, 1, 1), "cm")) +
-  ylim(0, 100)
-
-t5 <- ggplot(metrics, aes(x = detected, y = subsets_mito_percent)) +
-  geom_point(colour = "#33adff") +
-  labs(x = "Unique genes found", y = "Percent reads mitochondrial") +
-  ggtitle("Cellranger") +
-  theme_bw() +
-  theme(text = element_text(size = 18),
-        plot.margin = unit(c(1, 1, 1, 1), "cm")) +
-  geom_hline(yintercept = 10, lwd = 2) + ylim(1, 100)
-
+# Plot data as quantified by alevin
 location <- paste(path_to_mito_filtering, "/sce_objects/post_filtering/",
                   "H117_pTum1_alevin_linear.rds", sep = "")
 alevin <- readRDS(location)
 metrics <- as.data.frame(colData(alevin))
-t2 <- ggplot(metrics, aes(x = detected, y = subsets_mito_percent)) +
-  geom_point(colour = "#33adff") +
-  labs(x = "Unique genes found", y = "Percent reads mitochondrial") +
-  ggtitle("Alevin") +
-  theme_bw() +
-  geom_line(data = fitted_models, inherit.aes = F,
-            aes(x = V1, y = Comp.1), lwd = 2) +
-  geom_line(data = fitted_models, inherit.aes = F,
-            aes(x = V1, y = Comp.2), lwd = 2) +
-  theme(text = element_text(size = 18),
-        plot.margin = unit(c(1, 1, 1, 1), "cm")) +
-  ylim(0, 100)
+t2 <- plotDistributions(metrics, fitted_models, title = "Alevin")
+t6 <- plotNoModel(metrics, title = "Alevin") +
+  geom_hline(yintercept = opt$cutoff, lwd = line_width) + ylim(1, 100)
 
-t6 <- ggplot(metrics, aes(x = detected, y = subsets_mito_percent)) +
-  geom_point(colour = "#33adff") +
-  labs(x = "Unique genes found", y = "Percent reads mitochondrial") +
-  ggtitle("Alevin") +
-  theme_bw() +
-  theme(text = element_text(size = 18),
-        plot.margin = unit(c(1, 1, 1, 1), "cm")) +
-  geom_hline(yintercept = 10, lwd = 2) + ylim(1, 100)
-
+# Standardize barcodes
 cellranger$barcode <- gsub("-[0-9]", "", colnames(cellranger))
 cellranger_metrics <- as.data.frame(subset(colData(cellranger),
                                            select = c("barcode", "keep")))
@@ -389,8 +215,8 @@ miQC <- confusionMatrix(data = twoway$cellranger_status,
 t3 <- make_confusion_matrix(miQC[[2]], "miQC filtering")
 
 # Make basic cutoffs
-cellranger$cutoff <- cellranger$subsets_mito_percent > 10
-alevin$cutoff <- alevin$subsets_mito_percent > 10
+cellranger$cutoff <- cellranger$subsets_mito_percent > opt$cutoff
+alevin$cutoff <- alevin$subsets_mito_percent > opt$cutoff
 
 cellranger_cutoff <- as.data.frame(subset(colData(cellranger),
                                           select = c("barcode", "cutoff")))
@@ -440,9 +266,8 @@ png("~/Documents/Figures/SmartQC Paper/Supp Figure 2.png",
 ggplot(elbow, aes(x = ks, y = wcss)) +
   labs(x = "Number of clusters", y = "Within cluster sum of squares") +
   geom_line() + geom_point() +
-  #ggtitle(opt$file) +
   theme_bw() +
-  theme(text = element_text(size = 18))
+  theme(text = element_text(size = text_size))
 dev.off()
 
 ### FIGURE 5
@@ -458,16 +283,19 @@ sce <- runUMAP(sce,
 sce$`% Mito` <- sce$subsets_mito_percent
 
 q1 <- plotUMAP(sce, colour_by = "% Mito") +
-  theme(text = element_text(size = 18), plot.margin = unit(c(1, 1, 1, 1), "cm"))
+  theme(text = element_text(size = text_size),
+        plot.margin = unit(c(1, 1, 1, 1), "cm"))
 q2 <- plotUMAP(sce, colour_by = "Keep") +
   scale_fill_manual(name = "Keep", values = c("#999999", "#E69F00")) +
-  theme(text = element_text(size = 18), plot.margin = unit(c(1, 1, 1, 1), "cm"))
+  theme(text = element_text(size = text_size),
+        plot.margin = unit(c(1, 1, 1, 1), "cm"))
 
 sce$`Keep at 10% cutoff` <- sce$subsets_mito_percent < 10
 
 q3 <- plotUMAP(sce, colour_by = "Keep at 10% cutoff") +
   scale_fill_manual(name = "Keep", values = c("#999999", "#E69F00")) +
-  theme(text = element_text(size = 18), plot.margin = unit(c(1, 1, 1, 1), "cm"))
+  theme(text = element_text(size = text_size),
+        plot.margin = unit(c(1, 1, 1, 1), "cm"))
 
 
 # Based on supplemental figure 2, run mbkmeans with 6 clusters
@@ -479,7 +307,8 @@ six <-     mbkmeans(sce, clusters = 6,
 )
 sce$Clusters <- as.factor(six$Clusters)
 q4 <- plotUMAP(sce, colour_by = "Clusters") +
-  theme(text = element_text(size = 18), plot.margin = unit(c(1, 1, 1, 1), "cm"))
+  theme(text = element_text(size = text_size),
+        plot.margin = unit(c(1, 1, 1, 1), "cm"))
 
 everything <- colData(sce)
 A <- table(everything$Clusters)
@@ -498,7 +327,7 @@ df$ind <- paste(df$cluster, df$variable, sep = "")
 q5tmp <- ggplot(data = df, aes(x = cluster, y = value, fill = ind)) +
   geom_bar(stat = "identity", position = position_dodge()) +
   labs(x = "Cluster", y = "Number of cells") + theme_bw() +
-  theme(legend.position = "none", text = element_text(size = 18)) +
+  theme(legend.position = "none", text = element_text(size = text_size)) +
   ggtitle("Cluster membership by filtering method") +
   scale_fill_manual(values = c("#7396bf", "#96b1cf", "#b9cbdf", "#e6914d",
                                "#ecad79", "#f2c8a6", "#7dc072", "#9dd095",
@@ -517,7 +346,7 @@ T3 <- text_grob("10% cutoff", x = .1, just = "left", size = 16)
 # Construct a gtable - 2 columns X 3 rows
 leg <- gtable(width = unit(c(1, 3), "cm"), height = unit(c(1, 1, 1), "cm"))
 
-# Place the six grob into the table
+# Place the six groba into the table
 leg <- gtable_add_grob(leg, L1, t = 1, l = 1)
 leg <- gtable_add_grob(leg, L2, t = 2, l = 1)
 leg <- gtable_add_grob(leg, L3, t = 3, l = 1)
@@ -525,7 +354,6 @@ leg <- gtable_add_grob(leg, T1, t = 1, l = 2)
 leg <- gtable_add_grob(leg, T2, t = 2, l = 2)
 leg <- gtable_add_grob(leg, T3, t = 3, l = 2)
 
-# Get the ggplot grob for plot1
 g <- ggplotGrob(q5tmp)
 
 # Get the position of the panel,
@@ -536,8 +364,7 @@ pos <- g$layout[grepl("panel", g$layout$name), c("t", "l")]
 g <- gtable_add_cols(g, sum(leg$widths), pos$l)
 g <- gtable_add_grob(g, leg, t = pos$t, l = pos$l + 1)
 q5 <- gtable_add_cols(g, unit(20, "pt"), pos$l)
-
-
+                     
 png("~/Documents/Figures/SmartQC Paper/Figure 5.png",
     width = 7400, height = 3200, res = 300)
 q1 + q4 + q5 + q2 + q3 + plot_spacer()
